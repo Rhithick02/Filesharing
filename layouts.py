@@ -1,15 +1,16 @@
 import PySimpleGUI as sg
+from PySimpleGUI.PySimpleGUI import RELIEF_FLAT
 
 def create_layout(files, state):
     file_names = []
     file_action = []
     for idx, file in enumerate(files):
-        file_names.append([sg.Text(file['filename'])])
+        file_names.append([sg.Text(file['filename'], size=(70, 1))])
         file_action.append([sg.Button('X', key=f'remove_{idx}')])
 
     login = [
         [sg.Text('')],
-        [sg.Text('Enter username'), sg.InputText(key='Name')],
+        # [sg.Text('Enter username'), sg.InputText(key='Name')],
         [sg.Text('Enter password'), sg.InputText(password_char='*', key='Pass')],
         [sg.Text('', key='login_status', size=(20, 1))],
         [sg.Button('Connect'), sg.Button('Quit')]
@@ -17,13 +18,17 @@ def create_layout(files, state):
     
     main = [
         [sg.Text('Online', key='connection_status', size=(70, 1)), sg.Button('Share')],
-        [sg.Pane([sg.Column(file_names), sg.Column(file_action)])]
+        [sg.Pane([sg.Column(file_names), sg.Column(file_action)], 
+            relief=RELIEF_FLAT, 
+            show_handle=False,
+            orientation='horizontal'
+        )]
     ]
 
     share = [
         [sg.Text('Select files you would like to share', size=(70, 1))],
         [sg.Input('', key='browsing', size=(70, 1)), sg.FileBrowse()],
-        [sg.Text('', key='share_status')],
+        [sg.Text('', key='share_status', size=(20, 1))],
         [sg.Button('Send'), sg.Button('Abort')]
     ]
 
