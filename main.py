@@ -5,10 +5,12 @@ import random
 import asyncio
 import datetime
 import PySimpleGUI as sg
-from layouts import create_layout
 import tinymongo as tm
 import tinydb
 from tinymongo import TinyMongoClient
+
+from layouts import create_layout
+
 
 # Minor change to tinymongo for python 3.8 version
 class TinyMongoClient(tm.TinyMongoClient):
@@ -31,6 +33,23 @@ shared_files = db.Shares.find()
 
 state = 'init'
 window = sg.Window('Title', create_layout(shared_files, state), finalize=True)
+
+def cache_and_send(path):
+    basefile = os.path.basename(path)
+    cache_time = datetime.datetime.utcnow()
+    proper_time = cache_time.strftime("%Y%m%d_%H%M%S")
+    cache_path = os.path.join(os.getcwd(), f'cache/{basefile}_{proper_time}')
+    os.makedirs(cache_path)
+    shutil.copy2(path, os.path.join(cache_path, basefile))
+
+    db.Shares.insert({
+        'filename': basefile, 
+        'share_path': path, 
+        'progress': 100,
+        'cache': [{'cache_path': cache_path, 'cache_time': proper_time}]
+    })
+    files = db.Shares.find()
+    return files
 
 async def ui():
     global state, window
@@ -59,20 +78,7 @@ async def ui():
                 window['share_status'].update("File Not Found")
             else:
                 # Creating cache file
-                basefile = os.path.basename(path)
-                cache_time = datetime.datetime.utcnow()
-                proper_time = cache_time.strftime("%Y%m%d_%H%M%S")
-                cache_path = os.path.join(os.getcwd(), f'cache/{basefile}_{proper_time}')
-                os.makedirs(cache_path)
-                shutil.copy2(path, os.path.join(cache_path, basefile))
-
-                db.Shares.insert({
-                    'filename': basefile, 
-                    'share_path': values['browsing'], 
-                    'progress': 100,
-                    'cache': [{'cache_path': cache_path, 'cache_time': proper_time}]
-                })
-                shared_files = db.Shares.find()
+                shared_files = cache_and_send(path)                
                 new_window = sg.Window('Title', create_layout(shared_files, state), finalize=True)
                 window.close()
                 window = new_window
