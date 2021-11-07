@@ -1,11 +1,11 @@
 import PySimpleGUI as sg
 
-def create_layout(files):
+def create_layout(files, state):
     file_names = []
     file_action = []
-    for idx, file in files:
-        file_names.append(files['filename'])
-        file_action.append(sg.Button('X', key=f'remove_{idx}'))
+    for idx, file in enumerate(files):
+        file_names.append([sg.Text(file['filename'])])
+        file_action.append([sg.Button('X', key=f'remove_{idx}')])
 
     login = [
         [sg.Text('')],
@@ -17,14 +17,8 @@ def create_layout(files):
     
     main = [
         [sg.Text('Online', key='connection_status', size=(70, 1)), sg.Button('Share')],
-        [sg.Pane([
-            sg.Column(file_names),
-            sg.Column(file_action)
-        ])]
+        [sg.Pane([sg.Column(file_names), sg.Column(file_action)])]
     ]
-    
-    share_files = sg.Column(file_names)
-    share_action = sg.Column(file_action)
 
     share = [
         [sg.Text('Select files you would like to share', size=(70, 1))],
@@ -33,19 +27,17 @@ def create_layout(files):
         [sg.Button('Send'), sg.Button('Abort')]
     ]
 
+    if state == 'init':
+        login_panel = sg.Column(login, key='login_panel')
+        main_panel = sg.Column(main, key='main_panel', visible=False)
+        share_panel = sg.Column(share, key='share_panel', visible=False)
+    else:
+        login_panel = sg.Column(login, key='login_panel', visible=False)
+        main_panel = sg.Column(main, key='main_panel')
+        share_panel = sg.Column(share, key='share_panel', visible=False)
+
     layout = [
-        [sg.Pane([
-                    sg.Column(login, key='login_panel'), 
-                    sg.Column(main, key='main_panel', visible=False),
-                    sg.Column(share, key='share_panel', visible=False)
-                ],
-                relief=sg.RELIEF_FLAT
-            )
-        ]
+        [sg.Pane([login_panel, main_panel, share_panel], relief=sg.RELIEF_FLAT)]
     ]
 
     return layout
-
-# def rebuild(files):
-#     new_window = sg.Window('Title', create_layout(files))
-#     return new_window
