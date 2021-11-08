@@ -7,10 +7,10 @@ import datetime
 import PySimpleGUI as sg
 import tinymongo as tm
 import tinydb
+
 from tinymongo import TinyMongoClient
-
 from layouts import create_layout
-
+from filemanage import get_cache, check_local_file#, get_hash, update_cache
 
 # Minor change to tinymongo for python 3.8 version
 class TinyMongoClient(tm.TinyMongoClient):
@@ -34,19 +34,17 @@ shared_files = db.Shares.find()
 state = 'init'
 window = sg.Window('Title', create_layout(shared_files, state), finalize=True)
 
-def cache_and_send(path):
-    basefile = os.path.basename(path)
-    cache_time = datetime.datetime.utcnow()
-    proper_time = cache_time.strftime("%Y%m%d_%H%M%S")
-    cache_path = os.path.join(os.getcwd(), f'cache/{basefile}_{proper_time}')
-    os.makedirs(cache_path)
-    shutil.copy2(path, os.path.join(cache_path, basefile))
-
+async def cache_and_send(path):
+    basefile, proper_time, cache_modified, cache_hash, cache_path = await get_cache(path)
     db.Shares.insert({
         'filename': basefile, 
         'share_path': path, 
         'progress': 100,
-        'cache': [{'cache_path': cache_path, 'cache_time': proper_time}]
+        'cache': [{'cache_path': cache_path,
+                   'cache_time': proper_time,
+                   'cache_modified': cache_modified,
+                   'cache_hash': cache_hash
+                }]
     })
     files = db.Shares.find()
     return files
@@ -76,9 +74,11 @@ async def ui():
             # Check whether the filepath is valid
             if not os.path.isfile(path):
                 window['share_status'].update("File Not Found")
+            elif db.Shares.find_one({'share_path': path}):
+                window['share_status'].update("File exists!")
             else:
                 # Creating cache file
-                shared_files = cache_and_send(path)                
+                shared_files =  await cache_and_send(path)
                 new_window = sg.Window('Title', create_layout(shared_files, state), finalize=True)
                 window.close()
                 window = new_window
@@ -103,7 +103,7 @@ async def background():
         await asyncio.sleep(1)
 
 async def wait_list():
-    await asyncio.wait([background(), ui()])
+    await asyncio.wait([background(), ui(), check_local_file(db)])
 
 if __name__ == '__main__':
     # Responsible for asynchornous process
