@@ -2,3 +2,7 @@ X button functionality
 
 + Same file multiple times should throw an error
 
+Peer to peer architecture
+
+// Not done as video
+-> In portscanner video 6 exception error for timeout, same for login part in video 7
