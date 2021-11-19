@@ -111,7 +111,6 @@ class ConnectionHandler:
         
         # TODO: 
         # Challenge hashing has to be done
-
         password = {'password': 'password'}
         await self.send(password)
         confirmation = await self.recv()
@@ -138,6 +137,7 @@ class ConnectionHandler:
             return False
         if len(password['password']) > 1024:
             return False
+        print("Cleared password check....\n")
         # TODO:
         # Actual crypt stuff has to be done
         if password['password'] == 'password':
