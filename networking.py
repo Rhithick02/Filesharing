@@ -1,13 +1,17 @@
 import os
 import json
+import string
 import socket
+import random
 import asyncio
+import datetime
 import traceback
 import websockets
 import tinymongo as tm
 import tinydb
 
 from tinymongo import TinyMongoClient
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # Minor change to tinymongo for python 3.8 version
 class TinyMongoClient(tm.TinyMongoClient):
@@ -26,6 +30,7 @@ print(my_NAME, my_IP)
 __client__ = TinyMongoClient(os.path.join(os.getcwd(), 'data.db'))
 db = __client__['data']
 shared_files = db.Shares.find()
+SETTINGS = db.Settings.find_one({'_id': 'settings'})
 CONNECTIONS = set()
 
 class ConnectionHandler:
@@ -67,7 +72,6 @@ class ConnectionHandler:
         # Set up directories for file to save to
         cache_path = os.path.normpath(os.path.join(os.getcwd(), f"cache/{filename}_{cache_time}"))
         os.makedirs(cache_path)
-
         # Receive the file
         self.state = 'Transfer'
         with open(os.path.join(cache_path, filename), 'wb') as f:
@@ -82,18 +86,36 @@ class ConnectionHandler:
         # Verify the remote hash with local hash
         self.state = 'Connected' 
 
+    async def challenge_encode(self):
+        ip_sum = sum([int(i) for i in my_IP.split('.')])
+        characters = string.ascii_lowercase + string.ascii_uppercase + string.digits
+        scramble = ''.join([random.choice(characters) for _ in range(ip_sum)])
+        hour = datetime.datetime.utcnow().strftime('%H')
+        challenge = f"{scramble}{hour}"
+        mod = 3 - len(challenge) % 3
+        if mod != 3:
+            padding = '=' * mod
+            challenge += padding
+        timestamp = datetime.datetime.utcnow().timestamp()
+        pass_hash = generate_password_hash(f"{scramble}{SETTINGS['password']}{timestamp}")
+        return challenge, pass_hash, timestamp
+
+    async def challenge_decode(self, timestamp, challenge, pass_hash) -> bool:
+        ip_sum = sum([int(i) for i in self.websocket.remote_address[0].split('.')])
+        scramble = challenge[:ip_sum]
+        return check_password_hash(pass_hash, f"{scramble}{SETTINGS['password']}{timestamp}")
 
     async def login(self):
         try:
             self.websocket = await websockets.connect(self.uri)
         except ConnectionRefusedError:
-            print("Server connection refused.")
+            print("Server connection refused")
             return
         except ConnectionError:
             print("Connection Error")
             return
         except OSError:
-            print("OS Error.")
+            print("OS Error")
             return
         except websockets.exceptions.ConnectionClosed:
             print("Connection closed")
@@ -105,21 +127,26 @@ class ConnectionHandler:
         challenge = await self.recv()
         if 'challenge' not in challenge or 'hostname' not in challenge:
             return
-        if len(challenge['challenge']) > 1024 or len(challenge['hostname']) > 1024:
+        if len(challenge['challenge']) > 2048 or len(challenge['hostname']) > 1024:
             return
-        self.hostname = challenge['hostname']
-        
+
+        self.hostname = challenge['hostname']        
+        if not await self.challenge_decode(challenge['timestamp'], challenge['challenge'], challenge['key']):
+            print(f"Invalid or Malicious Challenge from {self.hostname}")
+            return
+
         # TODO: 
         # Challenge hashing has to be done
 
-        password = {'password': 'password'}
+        password = {'password': SETTINGS['password']}
         await self.send(password)
         confirmation = await self.recv()
         confirmed = confirmation.get('Connection')
         if confirmed == 'authorized':
             self.state = 'Connected'
             print(f"Connected to {self.hostname}")
-            return
+        else:
+            print(f"Password mismatch on {self.hostname}")
 
         # TODO:
         # Deal with unauthoried
@@ -131,7 +158,11 @@ class ConnectionHandler:
         if len(greeting['hostname']) > 1024:
             return False
         self.hostname = greeting['hostname']
-        challenge = {'challenge' : '8r4sdvb84edrf4bgh5re47y3kjan', 'hostname': my_NAME}
+        challenge, pass_hash, timestamp = await self.challenge_encode()
+        challenge = {'hostname': my_NAME,
+                     'challenge': challenge,
+                     'key': pass_hash,
+                     'timestamp': timestamp}
         await self.send(challenge)
         password = await self.recv()
         if 'password' not in password:
@@ -140,7 +171,7 @@ class ConnectionHandler:
             return False
         # TODO:
         # Actual crypt stuff has to be done
-        if password['password'] == 'password':
+        if password['password'] == SETTINGS['password']:
             await self.send({'Connection': 'authorized'})
             self.state = 'Connected'
             asyncio.get_event_loop().create_task(self.listener())
