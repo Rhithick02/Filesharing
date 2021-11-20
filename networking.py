@@ -1,8 +1,10 @@
 import os
+import rsa
 import json
 import string
 import socket
 import random
+import base64
 import asyncio
 import datetime
 import traceback
@@ -87,23 +89,26 @@ class ConnectionHandler:
         self.state = 'Connected' 
 
     async def challenge_encode(self):
-        ip_sum = sum([int(i) for i in my_IP.split('.')])
+        ip_sum1 = sum([int(i) for i in my_IP.split('.')])
+        ip_sum2 = sum([int(i) for i in self.websocket.remote_address[0].split('.')])
+        ip_sum = ip_sum1 + 2 * ip_sum2
         characters = string.ascii_lowercase + string.ascii_uppercase + string.digits
-        scramble = ''.join([random.choice(characters) for _ in range(ip_sum)])
-        hour = datetime.datetime.utcnow().strftime('%H')
-        challenge = f"{scramble}{hour}"
+        challenge = ''.join([random.choice(characters) for _ in range(ip_sum)])
         mod = 3 - len(challenge) % 3
         if mod != 3:
             padding = '=' * mod
             challenge += padding
-        timestamp = datetime.datetime.utcnow().timestamp()
-        pass_hash = generate_password_hash(f"{scramble}{SETTINGS['password']}{timestamp}")
+        salt = challenge[ip_sum1:ip_sum1+ip_sum2][::-1]
+        timestamp = int(datetime.datetime.utcnow().timestamp())
+        pass_hash = generate_password_hash(f"{salt}{SETTINGS['password']}{timestamp}")
         return challenge, pass_hash, timestamp
 
     async def challenge_decode(self, timestamp, challenge, pass_hash) -> bool:
-        ip_sum = sum([int(i) for i in self.websocket.remote_address[0].split('.')])
-        scramble = challenge[:ip_sum]
-        return check_password_hash(pass_hash, f"{scramble}{SETTINGS['password']}{timestamp}")
+        ip_sum1 = sum([int(i) for i in self.websocket.remote_address[0].split('.')])
+        ip_sum2 = sum([int(i) for i in my_IP.split('.')])
+        ip_sum = ip_sum1 + 2 * ip_sum2
+        salt = challenge[ip_sum1:ip_sum1+ip_sum2][::-1]
+        return check_password_hash(pass_hash, f"{salt}{SETTINGS['password']}{timestamp}")
 
     async def login(self):
         try:
@@ -135,10 +140,8 @@ class ConnectionHandler:
             print(f"Invalid or Malicious Challenge from {self.hostname}")
             return
 
-        # TODO: 
-        # Challenge hashing has to be done
-
-        password = {'password': SETTINGS['password']}
+        encrypted_pass = rsa.encrypt(SETTINGS['password'].encode(), rsa.PublicKey.load_pkcs1(challenge['public_key'].encode()))
+        password = {'password': base64.b64encode(encrypted_pass).decode()}
         await self.send(password)
         confirmation = await self.recv()
         confirmed = confirmation.get('Connection')
@@ -148,9 +151,6 @@ class ConnectionHandler:
         else:
             print(f"Password mismatch on {self.hostname}")
 
-        # TODO:
-        # Deal with unauthoried
-
     async def welcome(self) -> bool:
         greeting = await self.recv()
         if 'hostname' not in greeting:
@@ -159,19 +159,22 @@ class ConnectionHandler:
             return False
         self.hostname = greeting['hostname']
         challenge, pass_hash, timestamp = await self.challenge_encode()
+        public_key, private_key  = rsa.newkeys(512)
         challenge = {'hostname': my_NAME,
                      'challenge': challenge,
                      'key': pass_hash,
-                     'timestamp': timestamp}
+                     'timestamp': timestamp,
+                     'public_key': public_key.save_pkcs1().decode()}
         await self.send(challenge)
         password = await self.recv()
         if 'password' not in password:
             return False
         if len(password['password']) > 1024:
             return False
-        # TODO:
-        # Actual crypt stuff has to be done
-        if password['password'] == SETTINGS['password']:
+
+        decrypted_pass = rsa.decrypt(base64.b64decode(password['password'].encode()), private_key)
+
+        if decrypted_pass.decode() == SETTINGS['password']:
             await self.send({'Connection': 'authorized'})
             self.state = 'Connected'
             asyncio.get_event_loop().create_task(self.listener())
@@ -249,7 +252,7 @@ async def port_scanner():
         print("This is not a private network...\nSHUTTING DOWN!!")
         exit()
     ip_range = '.'.join(my_IP.split('.')[:3])
-    for i in range(1, 255):
+    for i in range(2, 255):
         target_ip = f"{ip_range}.{i}"
         print(target_ip)
         uri = f"ws://{target_ip}:1111"
