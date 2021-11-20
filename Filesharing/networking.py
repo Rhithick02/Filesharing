@@ -76,38 +76,54 @@ class ConnectionHandler:
 
     async def file_recv(self, _id, filename, cache_modified, cache_hash, cache_time):
         self.state = 'Transfer'
+        cache_path = os.path.normpath(os.path.join(os.getcwd(), f"cache/{filename}_{cache_time}"))
+        os.makedirs(cache_path)
+        with open(os.path.join(cache_path, filename), 'wb') as f:
+            while True:
+                buffer = await self.websocket.recv()
+                if buffer == ':EOF':
+                    break
+                print("Recv chunk")
+                f.write(buffer)
+                await asyncio.sleep(0.0001)
+        self.state = 'Connected' 
+        if await get_hash(os.path.join(cache_path, filename)) != cache_hash:
+            print(f"Download of {filename} from {self.hostname} was corrupt!..")
+            shutil.rmtree(cache_path)
+            return
         share = db.Shares.find_one({'_id': _id})
+        share_path = None
+        if share:        
+            share_path = share['share_path']
+            shutil.copy2(os.path.join(cache_path, filename), share_path)
+        else:
+            share_path = os.getcwd()
+            shutil.copy2(os.path.join(cache_path, filename), share_path)
+        mod_date = datetime.datetime.fromtimestamp(float(round(cache_modified)))
+        mod_time = time.mktime(mod_date.timetuple())
+        os.utime(share_path, (mod_time, mod_time))
+        new_cache = {'cache_path': cache_path,
+                     'cache_time': cache_time,
+                     'cache_modified': mod_date.timestamp(),
+                     'cache_hash': cache_hash}
+        cache_list = []
         if share:
-            cache_path = os.path.normpath(os.path.join(os.getcwd(), f"cache/{filename}_{cache_time}"))
-            os.makedirs(cache_path)
-            with open(os.path.join(cache_path, filename), 'wb') as f:
-                while True:
-                    buffer = await self.websocket.recv()
-                    if buffer == ':EOF':
-                        break
-                    print("Recv chunk")
-                    f.write(buffer)
-                    await asyncio.sleep(0.0001)
-            self.state = 'Connected' 
-            if await get_hash(os.path.join(cache_path, filename)) != cache_hash:
-                print(f"Download of {filename} from {self.hostname} was corrupt!..")
-                shutil.rmtree(cache_path)
-                return
-            shutil.copy2(os.path.join(cache_path, filename), share['share_path'])
-            mod_date = datetime.datetime.fromtimestamp(float(round(cache_modified)))
-            mod_time = time.mktime(mod_date.timetuple())
-            os.utime(share['share_path'], (mod_time, mod_time))
-            new_cache = {'cache_path': cache_path,
-                         'cache_time': cache_time,
-                         'cache_modified': mod_date.timestamp(),
-                         'cache_hash': cache_hash}
             cache_list = share['cache']
-            cache_list.append(new_cache)
-            if len(cache_list) > 2:
-                old_cache = cache_list.pop(0)
-                shutil.rmtree(old_cache['cache_path'])
+        cache_list.append(new_cache)
+        if len(cache_list) > 2:
+            old_cache = cache_list.pop(0)
+            shutil.rmtree(old_cache['cache_path'])
+        if share:
             db.Shares.update({'_id': _id}, {'$set': {'cache': cache_list}})
-            shared_files = db.Shares.find()
+        else:
+            db.Shares.insert({
+                            '_id': _id,
+                            'filename': filename, 
+                            'share_path': share_path, 
+                            'progress': 100,
+                            'cache': [new_cache]
+                            })
+        shared_files = db.Shares.find()
 
     async def challenge_encode(self):
         ip_sum1 = sum([int(i) for i in my_IP.split('.')])
@@ -217,12 +233,11 @@ class ConnectionHandler:
                     self.peers = data['connections']
                     for share in self.shares:
                         wanted = db.Shares.find_one({'_id': share['_id']})
-                        if wanted:
-                            if wanted['cache'][-1]['cache_hash'] != share['cache_hash']:
-                                if wanted['cache'][-1]['cache_time'] < share['cache_time']:
-                                    await self.send({'op_type': 'request',
-                                                     '_id': share['_id'],
-                                                     'filename': share['filename']})
+                        if not wanted or(wanted['cache'][-1]['cache_hash'] != share['cache_hash'] 
+                            and wanted['cache'][-1]['cache_time'] < share['cache_time']):
+                                await self.send({'op_type': 'request',
+                                                    '_id': share['_id'],
+                                                    'filename': share['filename']})
                         
                 if op_type == 'request':
                     print(f"{self.hostname} request:\n{data['filename']}")
