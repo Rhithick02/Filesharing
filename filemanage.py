@@ -45,7 +45,7 @@ async def update_cache(db, share):
     db.Shares.update({'_id': share['_id']}, {'$set': {'cache': cache_list}})
     print(f"Updated cache for {share['filename']}..")
 
-async def check_local_file(db):
+async def check_local_file(db, shared_files):
     while True:
         print("checking for updation...")
         for share in db.Shares.find():
@@ -54,5 +54,14 @@ async def check_local_file(db):
                 if share['cache'][-1]['cache_hash'] != await get_hash(share['share_path']):
                     print(f"Hash value has been changed for {share['filename']}")
                     await update_cache(db, share)
+                else:
+                    new_cache = {'cache_path': share['cache'][-1]['cache_path'],
+                                 'cache_time': share['cache'][-1]['cache_time'],
+                                 'cache_modified': os.path.getmtime(share['share_path']),
+                                 'cache_hash': share['cache'][-1]['cache_hash']}
+                    cache_list = share['cache']
+                    cache_list[-1] = new_cache
+                    db.Shares.update({'_id': share['_id']}, {'$set': {'cache': cache_list}})
+                    shared_files = db.Shares.find()
         print("Done checking")
         await asyncio.sleep(10)

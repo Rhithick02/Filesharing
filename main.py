@@ -11,7 +11,7 @@ import tinydb
 from tinymongo import TinyMongoClient
 from layouts import create_layout
 from filemanage import get_cache, check_local_file#, get_hash, update_cache
-
+from networking import port_scanner, status_update, start_server
 # Minor change to tinymongo for python 3.8 version
 class TinyMongoClient(tm.TinyMongoClient):
     @property
@@ -103,7 +103,7 @@ async def background():
         await asyncio.sleep(1)
 
 async def wait_list():
-    await asyncio.wait([background(), ui(), check_local_file(db)])
+    await asyncio.wait([background(), ui(), check_local_file(db, shared_files), port_scanner(), start_server])
 
 if __name__ == '__main__':
     # Responsible for asynchornous process

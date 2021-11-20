@@ -1,8 +1,10 @@
 import os
 import rsa
 import json
+import time
 import string
 import socket
+import shutil
 import random
 import base64
 import asyncio
@@ -13,6 +15,7 @@ import tinymongo as tm
 import tinydb
 
 from tinymongo import TinyMongoClient
+from filemanage import get_hash
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # Minor change to tinymongo for python 3.8 version
@@ -40,7 +43,8 @@ class ConnectionHandler:
     hostname = None #Of the connected machine
     uri = None
     state = 'Disconnected'
-
+    shares = None
+    peers = None
     async def send(self, message):
         try:
             data = json.dumps(message)
@@ -70,23 +74,40 @@ class ConnectionHandler:
                 await asyncio.sleep(0.0001)
         self.state = 'Connected'
 
-    async def file_recv(self, filename, cache_modified, cache_hash, cache_time):
-        # Set up directories for file to save to
-        cache_path = os.path.normpath(os.path.join(os.getcwd(), f"cache/{filename}_{cache_time}"))
-        os.makedirs(cache_path)
-        # Receive the file
+    async def file_recv(self, _id, filename, cache_modified, cache_hash, cache_time):
         self.state = 'Transfer'
-        with open(os.path.join(cache_path, filename), 'wb') as f:
-            while True:
-                buffer = await self.websocket.recv()
-                if buffer == ':EOF':
-                    break
-                print("Recv chunk")
-                f.write(buffer)
-                await asyncio.sleep(0.0001)
-        # TODO:
-        # Verify the remote hash with local hash
-        self.state = 'Connected' 
+        share = db.Shares.find_one({'_id': _id})
+        if share:
+            cache_path = os.path.normpath(os.path.join(os.getcwd(), f"cache/{filename}_{cache_time}"))
+            os.makedirs(cache_path)
+            with open(os.path.join(cache_path, filename), 'wb') as f:
+                while True:
+                    buffer = await self.websocket.recv()
+                    if buffer == ':EOF':
+                        break
+                    print("Recv chunk")
+                    f.write(buffer)
+                    await asyncio.sleep(0.0001)
+            self.state = 'Connected' 
+            if await get_hash(os.path.join(cache_path, filename)) != cache_hash:
+                print(f"Download of {filename} from {self.hostname} was corrupt!..")
+                shutil.rmtree(cache_path)
+                return
+            shutil.copy2(os.path.join(cache_path, filename), share['share_path'])
+            mod_date = datetime.datetime.fromtimestamp(float(round(cache_modified)))
+            mod_time = time.mktime(mod_date.timetuple())
+            os.utime(share['share_path'], (mod_time, mod_time))
+            new_cache = {'cache_path': cache_path,
+                         'cache_time': cache_time,
+                         'cache_modified': mod_date.timestamp(),
+                         'cache_hash': cache_hash}
+            cache_list = share['cache']
+            cache_list.append(new_cache)
+            if len(cache_list) > 2:
+                old_cache = cache_list.pop(0)
+                shutil.rmtree(old_cache['cache_path'])
+            db.Shares.update({'_id': _id}, {'$set': {'cache': cache_list}})
+            shared_files = db.Shares.find()
 
     async def challenge_encode(self):
         ip_sum1 = sum([int(i) for i in my_IP.split('.')])
@@ -159,6 +180,7 @@ class ConnectionHandler:
         if len(greeting['hostname']) > 1024:
             return False
         self.hostname = greeting['hostname']
+        self.uri = self.websocket.remote_address[0]
         challenge, pass_hash, timestamp = await self.challenge_encode()
         public_key, private_key  = rsa.newkeys(512)
         challenge = {'hostname': my_NAME,
@@ -174,11 +196,8 @@ class ConnectionHandler:
             return False
 
         decrypted_pass = rsa.decrypt(base64.b64decode(password['password'].encode()), private_key)
-
         if decrypted_pass.decode() == SETTINGS['password']:
-
-        print("Cleared password check....\n")
-
+            print("Cleared password check....\n")
             await self.send({'Connection': 'authorized'})
             self.state = 'Connected'
             asyncio.get_event_loop().create_task(self.listener())
@@ -194,27 +213,28 @@ class ConnectionHandler:
                 op_type = data.get('op_type')
                 if op_type == 'status':
                     print(f"{self.hostname} status:\n{data['connections']}\n{data['shares']}")
-                    # Get list of connections and check if any of those are neighbour, 
-                    # we are not connected to
-                    # Check the shares to see if we are looking for any changes to those files
-                    # compare those remote shared files against our own
-                    global ok
-                    if not ok and my_NAME == 'client':
-                        ok = True
-                        await self.send({'op_type': 'request',
-                                         'filename': 'networking.py'})
+                    self.shares = data['shares']
+                    self.peers = data['connections']
+                    for share in self.shares:
+                        wanted = db.Shares.find_one({'_id': share['_id']})
+                        if wanted:
+                            if wanted['cache'][-1]['cache_hash'] != share['cache_hash']:
+                                if wanted['cache'][-1]['cache_time'] < share['cache_time']:
+                                    await self.send({'op_type': 'request',
+                                                     '_id': share['_id'],
+                                                     'filename': share['filename']})
+                        
                 if op_type == 'request':
                     print(f"{self.hostname} request:\n{data['filename']}")
-                    # Prep all the file details the receipient needs
-                    # Send the file
                     for share in shared_files:
-                        if share['filename'] == data['filename']:
+                        if share['_id'] == data['_id']:
                             filename = share['filename']
                             cache_modified = share['cache'][-1]['cache_modified']
                             cache_path = share['cache'][-1]['cache_path']
                             cache_hash = share['cache'][-1]['cache_hash']
                             cache_time = share['cache'][-1]['cache_time']
                             await self.send({'op_type': 'sending',
+                                             '_id': share['_id'],
                                              'filename': filename,
                                              'cache_hash': cache_hash,
                                              'cache_modified': cache_modified,
@@ -224,7 +244,7 @@ class ConnectionHandler:
                 if op_type == 'sending':
                     print(f"{self.hostname} confirms:\n{data['filename']}")
                     # Take all the details for the file and receive it.
-                    await self.file_recv(data['filename'], data['cache_modified'], data['cache_hash'], data['cache_time'])
+                    await self.file_recv(data['_id'], data['filename'], data['cache_modified'], data['cache_hash'], data['cache_time'])
                     print("Download complete...")
         except websockets.exceptions.ConnectionClosed:
             print(f"Connection Closed from {self.hostname}")
@@ -295,9 +315,8 @@ async def status_update():
             connection_list.append({'hostname': CONNECTION.hostname, 'uri': CONNECTION.uri})
         
         for share in shared_files:
-            # from pprint import pprint
-            # pprint(share)
-            share_list.append({'filename': share['filename'],
+            share_list.append({'_id': share['_id'],
+                               'filename': share['filename'],
                                'cache_modified': share['cache'][-1]['cache_modified'],
                                'cache_hash': share['cache'][-1]['cache_hash'],
                                'cache_time': share['cache'][-1]['cache_time']})
@@ -310,8 +329,8 @@ async def status_update():
                                        'shares': share_list})
         await asyncio.sleep(10)
 
+start_server = websockets.serve(register_client, my_IP, 1111)
 if __name__ == '__main__':
-    start_server = websockets.serve(register_client, my_IP, 1111)
     asyncio.get_event_loop().run_until_complete(start_server)
     asyncio.get_event_loop().create_task(status_update())
     asyncio.get_event_loop().run_forever()
