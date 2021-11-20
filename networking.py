@@ -142,6 +142,7 @@ class ConnectionHandler:
 
         encrypted_pass = rsa.encrypt(SETTINGS['password'].encode(), rsa.PublicKey.load_pkcs1(challenge['public_key'].encode()))
         password = {'password': base64.b64encode(encrypted_pass).decode()}
+
         await self.send(password)
         confirmation = await self.recv()
         confirmed = confirmation.get('Connection')
@@ -175,6 +176,9 @@ class ConnectionHandler:
         decrypted_pass = rsa.decrypt(base64.b64decode(password['password'].encode()), private_key)
 
         if decrypted_pass.decode() == SETTINGS['password']:
+
+        print("Cleared password check....\n")
+
             await self.send({'Connection': 'authorized'})
             self.state = 'Connected'
             asyncio.get_event_loop().create_task(self.listener())
