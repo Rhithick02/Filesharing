@@ -24,5 +24,5 @@ A platform for peer-peer intra-network file sharing and file synchronising. Deve
 
     This file structures and maintains the layouts for the GUI.
 ### To run the file
-1. pip install -r requirments.txt
+1. pip install -r requirements.txt
 2. python3 main.py
