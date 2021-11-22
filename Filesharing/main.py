@@ -79,6 +79,7 @@ async def ui():
             else:
                 # Creating cache file
                 shared_files =  await cache_and_send(path)
+                print(shared_files)
                 new_window = sg.Window('Title', create_layout(shared_files, state), finalize=True)
                 window.close()
                 window = new_window
@@ -103,7 +104,7 @@ async def background():
         await asyncio.sleep(1)
 
 async def wait_list():
-    await asyncio.wait([background(), ui(), check_local_file(db, shared_files), port_scanner(), start_server])
+    await asyncio.wait([background(), ui(), check_local_file(db, shared_files), port_scanner(), status_update(), start_server])
 
 if __name__ == '__main__':
     # Responsible for asynchornous process

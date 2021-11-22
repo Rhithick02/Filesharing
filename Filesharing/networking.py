@@ -291,7 +291,7 @@ async def port_scanner():
         print("This is not a private network...\nSHUTTING DOWN!!")
         exit()
     ip_range = '.'.join(my_IP.split('.')[:3])
-    for i in range(2, 255):
+    for i in range(2, 4):
         target_ip = f"{ip_range}.{i}"
         print(target_ip)
         uri = f"ws://{target_ip}:1111"
