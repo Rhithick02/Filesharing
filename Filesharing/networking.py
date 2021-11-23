@@ -126,6 +126,7 @@ class ConnectionHandler:
         shared_files = db.Shares.find()
 
     async def challenge_encode(self):
+        SETTINGS = db.Settings.find_one({'_id': 'settings'})
         ip_sum1 = sum([int(i) for i in my_IP.split('.')])
         ip_sum2 = sum([int(i) for i in self.websocket.remote_address[0].split('.')])
         ip_sum = ip_sum1 + 2 * ip_sum2
@@ -225,10 +226,11 @@ class ConnectionHandler:
     async def listener(self):
         try:
             async for message in self.websocket:
+                db = __client__['data']
                 data = json.loads(message)
                 op_type = data.get('op_type')
-                if op_type == 'status':
-                    print(f"{self.hostname} status:\n{data['connections']}\n{data['shares']}")
+                if op_type == 'status':# and my_NAME == 'alchemist':
+                    # print(f"{self.hostname} status:\n{data['connections']}\n{data['shares']}")
                     self.shares = data['shares']
                     self.peers = data['connections']
                     for share in self.shares:
@@ -240,6 +242,7 @@ class ConnectionHandler:
                                                     'filename': share['filename']})
                         
                 if op_type == 'request':
+                    shared_files = db.Shares.find()
                     print(f"{self.hostname} request:\n{data['filename']}")
                     for share in shared_files:
                         if share['_id'] == data['_id']:
@@ -291,7 +294,7 @@ async def port_scanner():
         print("This is not a private network...\nSHUTTING DOWN!!")
         exit()
     ip_range = '.'.join(my_IP.split('.')[:3])
-    for i in range(2, 4):
+    for i in range(5, 10):
         target_ip = f"{ip_range}.{i}"
         print(target_ip)
         uri = f"ws://{target_ip}:1111"
@@ -324,12 +327,15 @@ async def unregister(connection):
 async def status_update():
     while True:
         print(f"Updating Status...{len(CONNECTIONS)}")
+        db = __client__['data']
+        shared_files = db.Shares.find()
         connection_list = []
         share_list = []
         for CONNECTION in CONNECTIONS:
             connection_list.append({'hostname': CONNECTION.hostname, 'uri': CONNECTION.uri})
-        
+        # print("Share list from status update")
         for share in shared_files:
+            # print(share)
             share_list.append({'_id': share['_id'],
                                'filename': share['filename'],
                                'cache_modified': share['cache'][-1]['cache_modified'],

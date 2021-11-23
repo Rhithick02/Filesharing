@@ -47,11 +47,15 @@ async def cache_and_send(path):
                 }]
     })
     files = db.Shares.find()
+    # print("Share list form main.py")
+    # for share in files:
+    #     print(share)
     return files
 
 async def ui():
     global state, window
     while True:
+        db = __client__['data']
         event, values = window.read(timeout=1)
         if state == 'init':
             state = 'login'
@@ -69,6 +73,15 @@ async def ui():
             window['main_panel'].update(visible=False)
             window['share_panel'].update(visible=True)
 
+        elif event == 'Ref':
+            # print("Refresh....boom!!")
+            shared_files = db.Shares.find()
+            new_window = sg.Window('Title', create_layout(shared_files, state), finalize=True)
+            window.close()
+            window = new_window
+            window['main_panel'].update(visible=True)
+            window['share_panel'].update(visible=False)
+
         elif event == 'Send':
             path = os.path.normpath(values['browsing'])
             # Check whether the filepath is valid
@@ -79,7 +92,6 @@ async def ui():
             else:
                 # Creating cache file
                 shared_files =  await cache_and_send(path)
-                print(shared_files)
                 new_window = sg.Window('Title', create_layout(shared_files, state), finalize=True)
                 window.close()
                 window = new_window

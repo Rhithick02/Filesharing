@@ -17,7 +17,7 @@ def create_layout(files, state):
     ]
     
     main = [
-        [sg.Text('Online', key='connection_status', size=(70, 1)), sg.Button('Share')],
+        [sg.Text('Online', key='connection_status', size=(50, 1)), sg.Button('Ref'), sg.Button('Share')],
         [sg.Pane([sg.Column(file_names), sg.Column(file_action)], 
             relief=sg.RELIEF_FLAT, 
             show_handle=False,
